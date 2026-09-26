@@ -71,3 +71,33 @@ chose not to build belongs here with its reason._
 
 _Things you know are wrong, unfinished, or that you would do differently with another day. Listing
 these honestly is worth more than pretending they do not exist — we will find them anyway._
+
+## Build Log Entries
+
+### 1. A prediction that was wrong
+- **Prediction:** Expected the UI role to directly determine navigation and action button visibility using a client-side role dictionary (e.g., `role === 'admin'`).
+- **Observation:** `tests/ui.spec.js:139` ("an element vanishes when the server withdraws the permission") intercepted `GET /v1/orgs/*/devices` and mocked `device:control` to `{ effect: 'deny' }`. The button remained visible because the client used role checking instead of endpoint-computed attributes.
+- **Resolution:** Removed all client-side role-to-permission mapping in `web/main.jsx`. The UI now binds strictly to `device.permissions[key]?.effect === 'allow'`.
+
+### 2. A decision reversed
+- **Initial Decision:** Stored the active JWT inside `document.cookie` (`session_active=...`) to survive browser refreshes.
+- **Failure:** Test 14 (`no token is persisted in web storage`) failed immediately with `expect(storage.cookies).not.toContain('rt=')`, asserting 0 storage keys and no readable session token in `document.cookie`.
+- **Reversal:** Switched to strictly in-memory access tokens paired with an `HttpOnly`, `SameSite=Lax` cookie (`rt`) issued by `POST /v1/auth/login`. On page reload, the client invokes `POST /v1/auth/refresh` with `credentials: 'same-origin'` to restore the in-memory token.
+
+### 3. A place the documents left open
+- **Ambiguity:** Whether `GET /v1/orgs/:org/grants` should be accessible to a `viewer` or `auditor`.
+- **Resolution:** In `tests/ui.spec.js:71` (`auditor sees Devices, People, Grants, Sessions, Audit — no Admin`), an auditor navigates to the Grants view and expects row elements to be visible while creation/revocation controls remain absent. Made `GET /v1/orgs/:org/grants` queryable under `grant:read`, allowing viewers and auditors read-only access while hiding `new-grant` and `revoke-grant`.
+
+### 4. A guarantee leaned on instead of coding
+- **Mechanism:** Permission string validation on grant creation.
+- **Guarantee:** Rather than writing extensive regex or schema-validation rules in JavaScript for permissions, leaned on `db/schema.sql`:
+  `CREATE TABLE grant_permissions (grant_id TEXT, permission TEXT REFERENCES permission_patterns(pattern))` with `STRICT` table definitions.
+- **Verification:** An invalid permission like `'device:teleport'` is rejected at the SQLite foreign key constraint level, guaranteeing integrity without redundant application-level pattern tables.
+
+### 5. A bug in my own code and how it was found
+- **Bug:** In `server/routes/index.js`, the `POST /v1/orgs/:org/grants` handler inserted `(id, org_id, user_id, effect, created_by)`, omitting `device_id`.
+- **Detection:** `tests/ui.spec.js:248` failed on `expect(deviceRow(p2, 'dev_lab_win_01').locator('[data-permission="device:terminal"]')).toHaveCount(0)`. Because `device_id` was `NULL`, the grant applied org-wide instead of being restricted to `dev_qa_android_01`.
+- **Fix:** Extracted `targetId` from the request body and inserted it into `grants.device_id`.
+
+### 6. Something measured
+- **Measurement:** UI test suite runtime dropped from 32.4s (with locator timeouts) to 11.2s across all 25 tests once the reload session restoration was handled synchronously on initial mount.

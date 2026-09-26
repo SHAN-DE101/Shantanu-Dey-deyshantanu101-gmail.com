@@ -63,3 +63,28 @@ cannot tell the difference between a decision and an oversight.
 
 What you chose not to build, and the reason. A scope cut with a stated reason is a senior
 judgement. An unmentioned gap is a gap.
+
+### D1: In-Memory Access Tokens with HttpOnly Refresh Cookie
+
+**What I chose:** Access tokens are stored exclusively in module-scoped JavaScript memory (`let inMemoryToken = null`). Session continuity across reloads is achieved via an `HttpOnly`, `SameSite=Lax` refresh cookie (`rt`) exchanged at `POST /v1/auth/refresh`.
+**Why:** `tests/ui.spec.js:201` (`no token is persisted in web storage`) explicitly asserts `localStorage`, `sessionStorage`, and readable `document.cookie` have length 0 and do not contain tokens.
+**What I rejected:** Storing the JWT in `localStorage` or accessible cookies. While simpler for SPA page reloads, it exposes the token to extraction via XSS and fails the security contract test.
+**What would change my mind:** If the application were hosted across multiple third-party domains requiring cross-site CORS without credentials support.
+
+---
+
+### D2: Server-Side Permission Resolution Over Client Matrices
+
+**What I chose:** The server computes an element-level permissions dictionary on all entity endpoints (`GET /v1/orgs/:org/devices`). The React SPA only renders an action if `permissions[key]?.effect === 'allow'`.
+**Why:** Verified by `tests/ui.spec.js:139` ("an element vanishes when the server withdraws the permission"). When Playwright intercepts the API route and replaces the permission effect with `deny`, the button immediately disappears.
+**What I rejected:** Hardcoding a role-to-permission mapping inside `web/main.jsx`. A client matrix decouples UI state from backend policy enforcement and fails dynamic grant evaluation.
+**What would change my mind:** A strict offline-first requirement where decisions must be computed on disconnected clients using signed policy bundles.
+
+---
+
+### D3: Presence Semantics (Absence Over Disabled State)
+
+**What I chose:** Elements for which the user lacks permission are completely omitted from the DOM rather than rendered with `disabled` attributes.
+**Why:** Stated in `tests/ui.spec.js:1`: "The rule under test: an element is PRESENT or ABSENT. There is no disabled state." Also prevents enumeration oracles on endpoints (e.g. `tests/ui.spec.js:127`).
+**What I rejected:** Rendering disabled buttons with tooltips explaining missing permissions. While common in internal enterprise tools, it leaks feature existence and organizational hierarchy to unauthorized observers.
+**What would change my mind:** Explicit enterprise UX requirements where users need discoverability to request privilege escalations for unavailable features.
